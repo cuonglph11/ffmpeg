@@ -7,21 +7,24 @@ const Jimp = require("jimp");
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-const originalFramesDir = "original_frames";
+/**
+ * Configs
+ */
 const outputUniqueDir = "unique_frames";
 const diffThreshold = 0.3;
 const newWidth = 640; // Desired width
 const newHeight = 360; // Desired height
 
-// Create directories if they don't exist
-if (!fs.existsSync(originalFramesDir)) {
-  fs.mkdirSync(originalFramesDir);
-}
-if (!fs.existsSync(outputUniqueDir)) {
-  fs.mkdirSync(outputUniqueDir);
-}
-
 const processVideoBuffer = (buffer, outputUniqueDir, isSaved) => {
+  // Create directories if they don't exist
+  const originalFramesDir = "original_frames";
+  if (!fs.existsSync(originalFramesDir)) {
+    fs.mkdirSync(originalFramesDir);
+  }
+  if (!fs.existsSync(outputUniqueDir)) {
+    fs.mkdirSync(outputUniqueDir);
+  }
+
   return new Promise((resolve, reject) => {
     const inputStream = new Readable();
     inputStream._read = () => {};
@@ -37,18 +40,12 @@ const processVideoBuffer = (buffer, outputUniqueDir, isSaved) => {
       .on("end", async () => {
         try {
           const uniqueBufferImages = await filterUniqueFrames(
-            originalFramesDir,
-            outputUniqueDir
+            originalFramesDir
           );
 
           //   Delete original frames
-          fs.readdir(originalFramesDir, (err, files) => {
+          fs.rm(originalFramesDir, { recursive: true }, (err) => {
             if (err) throw err;
-            for (const file of files) {
-              fs.unlink(path.join(originalFramesDir, file), (err) => {
-                if (err) throw err;
-              });
-            }
           });
 
           if (isSaved) {
@@ -74,44 +71,40 @@ const processVideoBuffer = (buffer, outputUniqueDir, isSaved) => {
   });
 };
 
-const filterUniqueFrames = async (originalFramesDir, outputUniqueDir) => {
+const filterUniqueFrames = async (originalFramesDir) => {
   const frameFiles = fs
     .readdirSync(originalFramesDir)
     .filter((file) => file.endsWith(".png"));
 
-  let prevImage = null;
+  let prevPngFrame = null;
   let uniqueFrameCount = 0;
-  const uniqueImages = [];
+  const uniqueBufferImages = [];
 
   const framesLength = frameFiles.length;
 
   for (let i = 0; i < framesLength; i++) {
     const framePath = path.join(originalFramesDir, frameFiles[i]);
     try {
-      const img = await Jimp.read(framePath);
+      const pngFrame = await Jimp.read(framePath);
+      const bufferFrame = await pngFrame.getBufferAsync(Jimp.MIME_PNG);
 
-      if (prevImage) {
-        const diff = Jimp.diff(prevImage, img).percent;
+      const isUniqueWithPrevious = (prevImage) => {
+        if (!prevImage) return true;
+        const diff = Jimp.diff(prevImage, pngFrame).percent;
+        return diff > diffThreshold;
+      };
 
-        if (diff > diffThreshold) {
-          const buffer = await img.getBufferAsync(Jimp.MIME_PNG);
-
-          uniqueImages.push(buffer);
-
-          uniqueFrameCount++;
-        }
-      } else {
-        const buffer = await img.getBufferAsync(Jimp.MIME_PNG);
-        uniqueImages.push(buffer);
-
+      if (isUniqueWithPrevious(prevPngFrame)) {
+        uniqueBufferImages.push(bufferFrame);
         uniqueFrameCount++;
       }
-      prevImage = img;
+
+      prevPngFrame = pngFrame;
     } catch (error) {
       console.error(`Failed to process ${framePath}:`, error);
     }
   }
-  return uniqueImages;
+  return uniqueBufferImages;
 };
 
 // Example usage
