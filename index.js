@@ -48,7 +48,10 @@ const processVideoWithFFmpeg = (
         "-vsync vfr",
       ])
       .on("end", resolve)
-      .on("error", reject)
+      .on("error", () => {
+        console.error("Error processing video with FFmpeg");
+        reject("Error processing video with FFmpeg");
+      })
       .run();
   });
 };
@@ -84,6 +87,7 @@ const filterUniqueFrames = async (originalFramesDir) => {
       prevPngFrame = pngFrame;
     } catch (error) {
       console.error(`Failed to process ${framePath}:`, error);
+      return uniqueBufferImages;
     }
   }
   return uniqueBufferImages;
@@ -123,7 +127,8 @@ const processVideoBuffer = async (buffer, outputUniqueDir, isSaved) => {
 
     return uniqueBufferImages;
   } catch (error) {
-    throw error;
+    console.error("Error processing video buffer:", error);
+    return [];
   }
 };
 
