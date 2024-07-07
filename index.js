@@ -15,16 +15,26 @@ const diffThreshold = 0.3;
 const newWidth = 640; // Desired width
 const newHeight = 360; // Desired height
 
-const processVideoBuffer = (buffer, outputUniqueDir, isSaved) => {
-  // Create directories if they don't exist
-  const originalFramesDir = "original_frames";
-  if (!fs.existsSync(originalFramesDir)) {
-    fs.mkdirSync(originalFramesDir);
+const createDirectoryIfNotExists = (dir) => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir);
   }
-  if (!fs.existsSync(outputUniqueDir)) {
-    fs.mkdirSync(outputUniqueDir);
-  }
+};
+const deleteDirectory = (dir) => {
+  return new Promise((resolve, reject) => {
+    fs.rm(dir, { recursive: true }, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+};
 
+const processVideoWithFFmpeg = (
+  buffer,
+  originalFramesDir,
+  newWidth,
+  newHeight
+) => {
   return new Promise((resolve, reject) => {
     const inputStream = new Readable();
     inputStream._read = () => {};
@@ -37,36 +47,8 @@ const processVideoBuffer = (buffer, outputUniqueDir, isSaved) => {
         `-vf scale=${newWidth}:${newHeight},select='not(mod(n\\,10))',setpts='N/(FRAME_RATE*TB)'`,
         "-vsync vfr",
       ])
-      .on("end", async () => {
-        try {
-          const uniqueBufferImages = await filterUniqueFrames(
-            originalFramesDir
-          );
-
-          //   Delete original frames
-          fs.rm(originalFramesDir, { recursive: true }, (err) => {
-            if (err) throw err;
-          });
-
-          if (isSaved) {
-            // Save unique images to disk
-            uniqueBufferImages.forEach((imgBuffer, index) => {
-              const outputPath = path.join(
-                outputUniqueDir,
-                `unique-frame-${index}.png`
-              );
-              fs.promises.writeFile(outputPath, imgBuffer);
-            });
-          }
-
-          resolve(uniqueBufferImages);
-        } catch (error) {
-          reject(error);
-        }
-      })
-      .on("error", (err) => {
-        reject(err);
-      })
+      .on("end", resolve)
+      .on("error", reject)
       .run();
   });
 };
@@ -105,6 +87,44 @@ const filterUniqueFrames = async (originalFramesDir) => {
     }
   }
   return uniqueBufferImages;
+};
+
+const saveUniqueFramesToDisk = (uniqueBufferImages, outputUniqueDir) => {
+  return Promise.all(
+    uniqueBufferImages.map((imgBuffer, index) => {
+      const outputPath = path.join(
+        outputUniqueDir,
+        `unique-frame-${index}.png`
+      );
+      return fs.promises.writeFile(outputPath, imgBuffer);
+    })
+  );
+};
+
+const processVideoBuffer = async (buffer, outputUniqueDir, isSaved) => {
+  const originalFramesDir = "original_frames";
+  createDirectoryIfNotExists(originalFramesDir);
+
+  try {
+    await processVideoWithFFmpeg(
+      buffer,
+      originalFramesDir,
+      newWidth,
+      newHeight
+    );
+
+    const uniqueBufferImages = await filterUniqueFrames(originalFramesDir);
+    await deleteDirectory(originalFramesDir);
+
+    if (isSaved) {
+      createDirectoryIfNotExists(outputUniqueDir);
+      await saveUniqueFramesToDisk(uniqueBufferImages, outputUniqueDir);
+    }
+
+    return uniqueBufferImages;
+  } catch (error) {
+    throw error;
+  }
 };
 
 // Example usage
